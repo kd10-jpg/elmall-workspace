@@ -1,0 +1,6 @@
+.DS_Store
+*.log
+# Dữ liệu có giá nhập – KHÔNG đưa lên repo công khai
+data/
+*.json.private
+elmall-goi-du-lieu*.json

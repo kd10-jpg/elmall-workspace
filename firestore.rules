@@ -1,0 +1,43 @@
+rules_version = '2';
+// Luật bảo mật Elmall:
+// - Quản lý (email trong danh sách dưới hoặc users/{email}.role == 'admin'): đọc/ghi mọi thứ, thấy giá nhập.
+// - Nhân viên (có users/{email}, active != false): chỉ đọc/ghi khách, đơn, việc của chính mình; chỉ thấy giá bán.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email != null && request.auth.token.email_verified == true; }
+    function me() { return request.auth.token.email.lower(); }
+    function hasProf() { return exists(/databases/$(database)/documents/users/$(me())); }
+    function prof() { return get(/databases/$(database)/documents/users/$(me())).data; }
+    function isAdmin() { return signedIn() && (me() in ['ĐIỀN_EMAIL_QUAN_LY@gmail.com'] || (hasProf() && prof().role == 'admin' && prof().active != false)); }
+    function isMember() { return signedIn() && (isAdmin() || (hasProf() && prof().active != false)); }
+    function ownsExisting() { return resource.data.owner == me(); }
+    function ownsNew() { return request.resource.data.owner == me(); }
+    function personal(col) { return col in ['customers', 'orders', 'tasks', 'projects', 'routines']; }
+
+    match /users/{email} {
+      allow read: if isAdmin() || (signedIn() && me() == email);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isMember() && me() == email
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'quoteEmail']));
+    }
+    match /settings/public { allow read: if isMember(); allow write: if isAdmin(); }
+    match /settings/private { allow read, write: if isAdmin(); }
+    match /catalog/{id} { allow read: if isMember(); allow write: if isAdmin(); }
+    match /catalogCost/{id} { allow read, write: if isAdmin(); }
+    match /orderCosts/{id} { allow read, write: if isAdmin(); }
+    match /images/{id} { allow read, write: if isMember(); }
+
+    match /{col}/{id} {
+      allow read: if personal(col) && (isAdmin() || (isMember() && ownsExisting()));
+      allow create: if personal(col) && (isAdmin() || (isMember() && ownsNew()));
+      allow update: if personal(col) && (isAdmin() || (isMember() && ownsExisting() && ownsNew()));
+      allow delete: if personal(col) && (isAdmin() || (isMember() && ownsExisting()));
+    }
+    match /trainings/{id} {
+      allow read: if isAdmin() || (isMember() && (ownsExisting() || me() in resource.data.attendees));
+      allow create: if isAdmin() || (isMember() && ownsNew());
+      allow update: if isAdmin() || (isMember() && ownsExisting() && ownsNew());
+      allow delete: if isAdmin() || (isMember() && ownsExisting());
+    }
+  }
+}

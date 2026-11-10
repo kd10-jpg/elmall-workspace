@@ -139,6 +139,7 @@ td.r,th.r{text-align:right}
 .day:last-child{border-bottom:0}.day .dl{width:64px;color:var(--ink2);font-size:12px;flex:none}
 .dchips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:5px}
 .logl{font-size:13px;color:var(--ink2);margin-top:4px}
+.ctab td{font-size:13px;padding:6px}.ctab th{padding:6px;white-space:nowrap}.ctab .cnote{min-width:260px}
 .cctpick{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:5px;font-size:12.5px;color:var(--ink2)}
 .cctpick .chip{padding:3px 10px;font-size:12.5px}.cctpick.need{background:var(--red-soft);border-radius:8px;padding:4px 6px}
 .mgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.mgrid .btn{padding:14px 6px}
@@ -249,7 +250,7 @@ const NAV=[
 
 /* ================= Trạng thái ================= */
 let db=null;
-const S={scope:(()=>{try{return localStorage.getItem("scope")||"me"}catch(e){return"me"}})(),users:[],catalogPub:{},catalogCost:{},orderCosts:{},catalog:{},products:[],orders:[],tasks:[],images:{},customers:[],projects:[],trainings:[],routines:[],custFilter:"due",custQ:"",prjFilter:"Đang chạy",settings:structuredClone(DEFAULT_SETTINGS),loaded:{p:false,o:false,t:false,s:false},view:"today",
+const S={custView:(()=>{try{return localStorage.getItem("custView")||"card"}catch(e){return"card"}})(),scope:(()=>{try{return localStorage.getItem("scope")||"me"}catch(e){return"me"}})(),users:[],catalogPub:{},catalogCost:{},orderCosts:{},catalog:{},products:[],orders:[],tasks:[],images:{},customers:[],projects:[],trainings:[],routines:[],custFilter:"due",custQ:"",prjFilter:"Đang chạy",settings:structuredClone(DEFAULT_SETTINGS),loaded:{p:false,o:false,t:false,s:false},view:"today",
   orderFilter:"active",orderQ:"",shelfQ:"",shelfBrand:"",shelfSup:"",draft:null,imp:null,settingsDirty:false,seedMsg:""};
 
 /* ================= Tiện ích ================= */
@@ -418,7 +419,7 @@ const wdOf=s=>new Date(s+"T00:00:00").getDay();
 function dayLabel(s){const t=todayStr();if(!s)return"";if(s===t)return"Hôm nay";if(s===addDays(t,1))return"Ngày mai";if(s<t)return`Trễ ${daysBetween(s,t)} ngày`;return WD[wdOf(s)]+" "+fmtD(s).slice(0,5)}
 function dueTag(s){if(!s)return"";const t=todayStr();const cls=s<t?"red":s===t?"amb":"";return`<span class="tag ${cls}">${dayLabel(s)}</span>`}
 function otag(x){return IS_ADMIN&&S.scope==="all"&&x&&x.owner&&x.owner!==ME.email?` <span class="otag">${esc(ownerName(x.owner))}</span>`:""}
-function custName(c){return c.company&&c.name?`${c.name} · ${c.company}`:(c.company||c.name||"(chưa có tên)")}
+function custName(c){return c.company&&c.name?`${c.name} · ${c.company}`:(c.name||c.company||c.phone||c.email||"(chưa có tên)")}
 function custOrders(c){return S.orders.filter(o=>o.customerId===c.id)}
 function careDue(){const t=todayStr();return S.customers.filter(c=>c.nextCare&&c.nextCare<=t&&!c.archived).sort((a,b)=>a.nextCare.localeCompare(b.nextCare))}
 function waitingQuotes(){return S.orders.filter(o=>o.status===0).sort((a,b)=>(a.createdAt||"").localeCompare(b.createdAt||""))}
@@ -936,6 +937,80 @@ function editUser(u){const isNew=!u.id;
     const ok=await save(()=>db.doc("users/"+email).set({...(u.id?u:{}),...body,id:undefined}),"Đã lưu nhân viên");if(ok)closeModal()};
   if(!isNew&&u.id!==ME.email)$("#udel").onclick=()=>confirmBox("Xoá nhân viên?",u.id+" sẽ không đăng nhập được nữa. Khách và đơn của họ vẫn còn.",()=>save(()=>db.doc("users/"+u.id).delete(),"Đã xoá"))}
 
+/* ================= KHÁCH HÀNG: nhập / xuất Excel, xem dạng bảng ================= */
+const CFIELD=[["stt",/^(stt|tt|so tt)$/],["name",/^(ho ten|ho va ten|ten|ten khach|ten kh|khach hang|nguoi lien he|lien he)$/],["address",/dia chi/],["company",/don vi|cong ty|to chuc|doanh nghiep/],
+  ["phone",/dien thoai|^sdt|so dt|phone|mobile|^dt$/],["email",/gmail|email|e-mail|^mail/],["lastContact",/time|lien lac|^ll|ngay/],["note",/ghi chu|note/]];
+const CLABEL={stt:"STT",name:"Họ tên",address:"Địa chỉ",company:"Đơn vị",phone:"Điện thoại",email:"Gmail",lastContact:"Liên lạc gần nhất",note:"Ghi chú"};
+function phoneClean(v){if(v==null||v==="")return"";let s=typeof v==="number"?String(Math.round(v)):String(v);const d=s.replace(/[^\d+]/g,"");if(!d)return String(v).trim();
+  let x=d.replace(/^\+?84/,"0");if(/^[1-9]\d{8}$/.test(x))x="0"+x;return x}
+function toISODate(v){if(v instanceof Date&&!isNaN(v))return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");
+  const m=String(v||"").trim().match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);if(m)return`${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;return""}
+function custExtraCols(){const seen=[];for(const c of S.customers)for(const k of (c.extraOrder||Object.keys(c.extra||{})))if(!seen.includes(k))seen.push(k);return seen}
+function custImport(){
+  openModal(`<div class="modal wide"><div class="row"><h2 class="grow">Nhập khách hàng từ Excel</h2><button class="btn ghost" data-close>✕</button></div>
+  <p class="specs">File Excel có dòng tiêu đề (Họ tên, Đơn vị, Điện thoại, Gmail, Địa chỉ, Ghi chú, Liên lạc gần nhất…). Các cột khác cũng được giữ nguyên.</p>
+  <div class="drop" id="cdrop" style="margin-top:8px"><b>Kéo thả file Excel vào đây</b> hoặc <label style="color:var(--blue);cursor:pointer;font-weight:700">chọn file<input type="file" id="cfile" accept=".xlsx,.xls,.csv" hidden></label></div>
+  <div id="cprev" style="margin-top:12px"></div></div>`);
+  const dz=$("#cdrop");dz.ondragover=e=>{e.preventDefault();dz.classList.add("over")};dz.ondragleave=()=>dz.classList.remove("over");
+  dz.ondrop=e=>{e.preventDefault();dz.classList.remove("over");const f=e.dataTransfer.files[0];if(f)readCustFile(f)};
+  $("#cfile").onchange=e=>{const f=e.target.files[0];if(f)readCustFile(f)}}
+async function readCustFile(f){const el=$("#cprev");el.innerHTML=`<p class="specs">Đang đọc ${esc(f.name)}…</p>`;
+  try{await loadScript("vendor/xlsx.full.min.js");const wb=XLSX.read(await f.arrayBuffer(),{type:"array"});
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:""});
+    let h=-1;for(let i=0;i<Math.min(15,rows.length);i++){const n=rows[i].map(x=>norm(String(x)));if(n.filter(Boolean).length>=2&&n.some(x=>CFIELD.slice(1).some(([,re])=>re.test(x)))){h=i;break}}
+    if(h<0){el.innerHTML=`<div class="banner">Không tìm thấy dòng tiêu đề (cần có cột như "Họ tên", "Điện thoại"…).</div>`;return}
+    const head=rows[h];const width=Math.max(...rows.slice(h).map(r=>r.length));const map=[];const used=new Set();
+    for(let j=0;j<width;j++){const raw=String(head[j]??"").trim();const n=norm(raw);const fld=CFIELD.find(([k,re])=>!used.has(k)&&re.test(n));
+      if(fld){used.add(fld[0]);map[j]={field:fld[0],label:raw}}else{const hasData=rows.slice(h+1).some(r=>String(r[j]??"").trim());if(raw||hasData)map[j]={extra:raw||("Cột "+XLSX.utils.encode_col(j)),label:raw||("Cột "+XLSX.utils.encode_col(j))}}}
+    const recs=[];const extraOrder=map.filter(m=>m&&m.extra).map(m=>m.extra);
+    for(const r of rows.slice(h+1)){const o={extra:{}};let any=false;
+      map.forEach((m,j)=>{if(!m)return;let v=r[j];if(v===""||v==null)return;
+        if(m.field==="phone")v=phoneClean(v);else if(m.field==="lastContact"){if(typeof v==="number"&&v>20000&&v<80000){const p=XLSX.SSF.parse_date_code(v);v=`${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`}const d=/^\d{4}-\d{2}-\d{2}$/.test(v)?v:toISODate(v);if(d)v=d;else{o.extra[m.label]=String(v);any=true;return}}
+        else if(m.field==="stt")v=Number(v)||String(v);else if(v instanceof Date)v=toISODate(v);else v=typeof v==="number"?String(v):String(v).trim();
+        if(m.field){o[m.field]=v;if(m.field!=="stt")any=true}else{o.extra[m.extra]=v;any=true}});
+      if(!any)continue;o.extraOrder=extraOrder;recs.push(o)}
+    // gộp dòng trùng SĐT trong file
+    const byPhone=new Map(),list=[];for(const o of recs){const p=normPhone(o.phone);if(p&&byPhone.has(p)){const a=byPhone.get(p);for(const k of ["name","company","email","address"])if(!a[k]&&o[k])a[k]=o[k];
+        if(o.note&&o.note!==a.note)a.note=[a.note,o.note].filter(Boolean).join(" | ");if(o.lastContact&&(!a.lastContact||o.lastContact>a.lastContact))a.lastContact=o.lastContact;Object.assign(a.extra,o.extra);a._dup=(a._dup||0)+1}
+      else{if(p)byPhone.set(p,o);list.push(o)}}
+    const ckey=c=>c.phone?"p:"+normPhone(c.phone):"n:"+norm([c.name,c.company,c.email,c.note].join("|"));
+    const exist=new Map(S.customers.map(c=>[ckey(c),c]));let nNew=0,nUpd=0;list.forEach(o=>{const e=exist.get(ckey(o));o._match=e?e.id:"";if(e)nUpd++;else nNew++});
+    S.custImp={list,map:map.filter(Boolean)};
+    const cols=map.filter(Boolean);
+    el.innerHTML=`<div class="card" style="padding:10px 12px"><b>${list.length}</b> khách · <span class="tag green">${nNew} mới</span> <span class="tag blue">${nUpd} đã có (trùng SĐT / trùng tên)</span>${recs.length>list.length?` · gộp ${recs.length-list.length} dòng trùng SĐT trong file`:""}
+      <div class="specs" style="margin-top:6px">Cột nhận ra: ${cols.map(m=>m.field?`<b>${esc(m.label||CLABEL[m.field])}</b> → ${CLABEL[m.field]}`:`<b>${esc(m.label)}</b> (giữ nguyên)`).join(" · ")}</div></div>
+      <div class="row" style="margin-top:10px;gap:14px;flex-wrap:wrap">
+        <label class="row" style="gap:6px;font-size:14px"><input type="checkbox" id="cupd" checked style="width:auto"> Khách đã có: bổ sung thông tin còn thiếu (không tạo trùng)</label>
+        ${IS_ADMIN&&S.users.length?`<label class="f" style="display:flex;gap:6px;align-items:center">Giao cho <select id="cowner" style="width:auto">${[{id:ME.email,name:"Tôi"},...S.users.filter(u=>u.id!==ME.email&&u.active!==false)].map(u=>`<option value="${esc(u.id)}">${esc(u.name||u.id)}</option>`).join("")}</select></label>`:""}</div>
+      <div class="tbl-wrap card" style="margin-top:10px;padding:4px;max-height:320px;overflow:auto"><table><thead><tr>${cols.map(m=>`<th>${esc(m.label||CLABEL[m.field])}</th>`).join("")}</tr></thead><tbody>
+      ${list.slice(0,30).map(o=>`<tr>${cols.map(m=>`<td style="font-size:13px">${esc(m.field?(m.field==="lastContact"&&o.lastContact?fmtD(o.lastContact):o[m.field]??""):(o.extra[m.extra]??""))}</td>`).join("")}</tr>`).join("")}</tbody></table>
+      ${list.length>30?`<p class="specs" style="padding:6px">… và ${list.length-30} khách nữa</p>`:""}</div>
+      <div class="row" style="justify-content:flex-end;margin-top:12px"><span class="specs grow" id="cimsg"></span><button class="btn" data-close>Hủy</button><button class="btn pri" id="cimgo">Nhập ${list.length} khách</button></div>`;
+    $("#modal").querySelectorAll("[data-close]").forEach(b=>b.onclick=closeModal);$("#cimgo").onclick=commitCustImport}
+  catch(e){el.innerHTML=`<div class="banner">Lỗi đọc file: ${esc(e.message||e)}</div>`}}
+async function commitCustImport(){const {list}=S.custImp;const btn=$("#cimgo");btn.disabled=true;const owner=($("#cowner")&&$("#cowner").value)||ME.email;const upd=$("#cupd")?$("#cupd").checked:true;
+  const ops=[];for(const o of list){const body={};for(const k of ["stt","name","company","phone","email","address","note","lastContact"])if(o[k]!==undefined&&o[k]!=="")body[k]=o[k];
+    if(Object.keys(o.extra).length){body.extra=o.extra;body.extraOrder=o.extraOrder}
+    if(o._match){if(!upd)continue;const c=S.customers.find(x=>x.id===o._match);const u={};for(const [k,v] of Object.entries(body)){if(k==="extra")u.extra={...(c.extra||{}),...v};else if(k==="note"&&c.note&&c.note!==v)u.note=c.note.includes(v)?c.note:c.note+" | "+v;else if(!c[k])u[k]=v}
+      if(Object.keys(u).length)ops.push({ref:FS.collection("customers").doc(o._match),upd:u})}
+    else ops.push({ref:FS.collection("customers").doc(),set:{...body,owner,tag:"Tiềm năng",nextCare:"",createdAt:nowIso(),log:[]}})}
+  try{for(let i=0;i<ops.length;i+=400){const b=FS.batch();for(const op of ops.slice(i,i+400)){if(op.set)b.set(op.ref,op.set);else b.update(op.ref,op.upd)}
+      $("#cimsg").textContent=`Đang lưu ${Math.min(i+400,ops.length)}/${ops.length}…`;await b.commit()}
+    toast(`Đã nhập ${ops.length} khách`);S.custImp=null;closeModal();S.custFilter="all";viewCustomers()}
+  catch(e){$("#cimsg").textContent="Lỗi: "+(e.code==="permission-denied"?"không có quyền":(e.message||e.code));btn.disabled=false}}
+async function custExport(){try{await loadScript("vendor/xlsx.full.min.js");const ex=custExtraCols();
+  const rows=S.customers.slice().sort((a,b)=>(Number(a.stt)||1e9)-(Number(b.stt)||1e9)).map((c,i)=>{const r={"STT":c.stt||i+1,"Họ tên":c.name||"","Địa chỉ":c.address||"","Đơn vị":c.company||"","Điện thoại":c.phone||"","Gmail":c.email||"","Liên lạc gần nhất":c.lastContact?fmtD(c.lastContact):"","Ghi chú":c.note||""};
+    for(const k of ex)r[k]=(c.extra||{})[k]??"";r["Phân loại"]=c.tag||"";r["Hẹn gọi"]=c.nextCare?fmtD(c.nextCare):"";r["Mục tiêu"]=c.careNote||"";
+    r["Lịch sử chăm sóc"]=(c.log||[]).slice(0,5).map(l=>`${fmtD(l.date)} ${[l.result,l.text].filter(Boolean).join(": ")}`).join("\n");if(IS_ADMIN&&S.scope==="all")r["Phụ trách"]=ownerName(c.owner);return r});
+  const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Khách hàng");XLSX.writeFile(wb,`Khach-hang-Elmall-${todayStr()}.xlsx`);toast("Đã xuất "+rows.length+" khách")}
+  catch(e){toast("Lỗi xuất: "+(e.message||e))}}
+function custTable(a){const ex=custExtraCols();
+  return`<div class="card tbl-wrap" style="padding:4px"><table class="ctab"><thead><tr><th>STT</th><th>Họ tên</th><th>Địa chỉ</th><th>Đơn vị</th><th>Điện thoại</th><th>Gmail</th><th>LL gần nhất</th><th>Ghi chú</th>${ex.map(k=>`<th>${esc(k)}</th>`).join("")}<th>Hẹn gọi</th><th></th></tr></thead><tbody>
+  ${a.slice(0,600).map((c,i)=>`<tr><td>${esc(c.stt??i+1)}</td><td><b>${esc(c.name||"")}</b>${otag(c)}</td><td>${esc(c.address||"")}</td><td>${esc(c.company||"")}</td><td style="white-space:nowrap">${esc(c.phone||"")}</td><td>${esc(c.email||"")}</td>
+    <td style="white-space:nowrap">${c.lastContact?fmtD(c.lastContact):""}</td><td class="cnote">${esc(c.note||"")}</td>${ex.map(k=>`<td>${esc((c.extra||{})[k]??"")}</td>`).join("")}
+    <td style="white-space:nowrap">${c.nextCare?dueTag(c.nextCare):""}</td><td style="white-space:nowrap"><button class="btn sm pri" data-care="${c.id}">Chăm sóc</button> <button class="btn sm" data-cedit="${c.id}">Sửa</button></td></tr>`).join("")}</tbody></table>
+  ${a.length>600?`<p class="specs" style="padding:6px">Hiển thị 600/${a.length} – gõ tìm để lọc.</p>`:""}</div>`}
+
 /* ================= KHÁCH HÀNG ================= */
 const CARE_RESULTS=["Đã gọi","Đã gửi báo giá","Khách hẹn lại","Khách chốt đơn","Không nghe máy","Gặp trực tiếp","Zalo/nhắn tin"];
 const CTAGS=["Tiềm năng","Đang báo giá","Đã mua","Khách quen","Ngừng"];
@@ -945,24 +1020,30 @@ function bindDatePicker(root){root.querySelectorAll(".dchips").forEach(w=>{const
   w.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{inp.value=c.dataset.d;mark();inp.dispatchEvent(new Event("input",{bubbles:true}))});inp.addEventListener("change",mark)})}
 function viewCustomers(){const f=S.custFilter;const t=todayStr();
   const chips=[["due","Cần gọi hôm nay",careDue().length],["week","7 ngày tới",S.customers.filter(c=>c.nextCare>t&&c.nextCare<=addDays(t,7)).length],["nocare","Chưa hẹn",S.customers.filter(c=>!c.nextCare&&!c.archived).length],["all","Tất cả",S.customers.length]];
-  $("#main").innerHTML=`${loadingNote()}<div class="row"><div class="grow"><h1>Khách hàng</h1><p class="sub">Báo giá xong là khách tự vào đây kèm ngày hẹn chăm sóc lại.</p></div><button class="btn amb" id="cadd">+ Thêm khách</button></div>
+  $("#main").innerHTML=`${loadingNote()}<div class="row"><div class="grow"><h1>Khách hàng</h1><p class="sub">Báo giá xong là khách tự vào đây kèm ngày hẹn chăm sóc lại. ${S.customers.length} khách.</p></div>
+  <div class="row" style="gap:6px"><button class="btn" id="cimp">📥 Nhập từ Excel</button><button class="btn" id="cexp">📤 Xuất Excel</button><button class="btn amb" id="cadd">+ Thêm khách</button></div></div>
   <div class="chips" style="margin-bottom:10px">${chips.map(([k,l,n])=>`<button class="chip ${f===k?"on":""}" data-cf="${k}">${l} <span style="opacity:.6">${n}</span></button>`).join("")}</div>
-  <input id="cq" placeholder="Tìm tên, công ty, SĐT…" value="${esc(S.custQ)}" style="margin-bottom:12px"><div id="clist"></div>`;
-  $("#cadd").onclick=()=>editCustomer({});
+  <div class="row" style="margin-bottom:12px;gap:8px"><input id="cq" class="grow" placeholder="Tìm tên, đơn vị, SĐT, ghi chú…" value="${esc(S.custQ)}" style="width:auto"><div class="chips"><button class="chip ${S.custView!=="table"?"on":""}" data-cv="card">Dạng thẻ</button><button class="chip ${S.custView==="table"?"on":""}" data-cv="table">Dạng bảng</button></div></div><div id="clist"></div>`;
+  $("#cadd").onclick=()=>editCustomer({});$("#cimp").onclick=custImport;$("#cexp").onclick=custExport;
+  $("#main").querySelectorAll("[data-cv]").forEach(b=>b.onclick=()=>{S.custView=b.dataset.cv;try{localStorage.setItem("custView",S.custView)}catch(e){}viewCustomers()});
   $("#main").querySelectorAll("[data-cf]").forEach(c=>c.onclick=()=>{S.custFilter=c.dataset.cf;viewCustomers()});
   $("#cq").oninput=e=>{S.custQ=e.target.value;renderCustList()};renderCustList()}
 function renderCustList(){const el=$("#clist");if(!el)return;const t=todayStr();let a=S.customers;const f=S.custFilter;
   if(f==="due")a=careDue();else if(f==="week")a=a.filter(c=>c.nextCare>t&&c.nextCare<=addDays(t,7)).sort((x,y)=>x.nextCare.localeCompare(y.nextCare));else if(f==="nocare")a=a.filter(c=>!c.nextCare&&!c.archived);
   else a=[...a].sort((x,y)=>(x.nextCare||"9").localeCompare(y.nextCare||"9"));
-  const toks=norm(S.custQ).split(/\s+/).filter(Boolean);if(toks.length)a=a.filter(c=>{const h=norm([c.name,c.company,c.phone,c.email,c.address,c.note].join(" "));return toks.every(x=>h.includes(x))});
+  const toks=norm(S.custQ).split(/\s+/).filter(Boolean);if(toks.length)a=a.filter(c=>{const h=norm([c.name,c.company,c.phone,c.email,c.address,c.note,...Object.values(c.extra||{})].join(" "));return toks.every(x=>h.includes(x))});
   if(!a.length){el.innerHTML=`<div class="card empty">${f==="due"?"Không có khách cần gọi hôm nay 👍":"Chưa có khách nào ở mục này."}</div>`;return}
-  el.innerHTML=a.map(c=>{const os=custOrders(c);const won=os.filter(o=>o.status>=1).reduce((s,o)=>s+orderTotals(o).total,0);const last=os[0];
+  if(f==="all"||f==="nocare")a=[...a].sort((x,y)=>(Number(x.stt)||1e9)-(Number(y.stt)||1e9)||(x.nextCare||"9").localeCompare(y.nextCare||"9"));
+  if(S.custView==="table"){el.innerHTML=custTable(a);bindCommon(el);el.querySelectorAll("[data-cedit]").forEach(b=>b.onclick=()=>editCustomer(S.customers.find(x=>x.id===b.dataset.cedit)));return}
+  el.innerHTML=a.slice(0,300).map(c=>{const os=custOrders(c);const won=os.filter(o=>o.status>=1).reduce((s,o)=>s+orderTotals(o).total,0);const last=os[0];
     return`<div class="order"><div class="row"><h3 class="grow">${esc(custName(c))} ${c.tag?`<span class="tag">${esc(c.tag)}</span>`:""}${otag(c)}</h3>${c.nextCare?`<span>📞 ${dueTag(c.nextCare)}</span>`:`<span class="tag">Chưa hẹn gọi</span>`}</div>
     <div class="specs" style="margin-top:3px">${[c.phone&&"☎ "+esc(c.phone),c.email&&esc(c.email),c.address&&esc(c.address)].filter(Boolean).map(x=>`<span>${x}</span>`).join("")}</div>
     ${c.careNote?`<div class="note">🎯 ${esc(c.careNote)}</div>`:""}
+    ${c.note||c.lastContact?`<div class="logl">${c.lastContact?`<b>LL gần nhất ${fmtD(c.lastContact)}</b> · `:""}${esc(c.note||"")}</div>`:""}
+    ${Object.keys(c.extra||{}).length?`<div class="specs">${(c.extraOrder||Object.keys(c.extra)).filter(k=>c.extra[k]!==undefined&&c.extra[k]!=="").map(k=>`<span>${esc(k)}: ${esc(c.extra[k])}</span>`).join("")}</div>`:""}
     <div class="specs" style="margin-top:6px">${os.length?`${os.length} báo giá${won?` · đã chốt ${money(won)}đ`:""} · gần nhất ${esc(last.code)} (${STEPS[last.status]})`:"Chưa có báo giá"}</div>
     ${(c.log||[]).slice(0,3).map(l=>`<div class="logl"><b>${fmtD(l.date)}</b> ${l.result?`<span class="tag">${esc(l.result)}</span> `:""}${esc(l.text||"")}</div>`).join("")}
-    <div class="row" style="justify-content:flex-end;gap:6px;margin-top:8px"><button class="btn sm pri" data-care="${c.id}">Ghi chăm sóc</button><button class="btn sm" data-cquote="${c.id}">Báo giá mới</button><button class="btn sm" data-cedit="${c.id}">Sửa</button></div></div>`}).join("");
+    <div class="row" style="justify-content:flex-end;gap:6px;margin-top:8px"><button class="btn sm pri" data-care="${c.id}">Ghi chăm sóc</button><button class="btn sm" data-cquote="${c.id}">Báo giá mới</button><button class="btn sm" data-cedit="${c.id}">Sửa</button></div></div>`}).join("")+(a.length>300?`<p class="specs">Hiển thị 300/${a.length} khách – gõ tìm để lọc, hoặc chuyển "Dạng bảng".</p>`:"");
   bindCommon(el);
   el.querySelectorAll("[data-cedit]").forEach(b=>b.onclick=()=>editCustomer(S.customers.find(x=>x.id===b.dataset.cedit)));
   el.querySelectorAll("[data-cquote]").forEach(b=>b.onclick=()=>{const c=S.customers.find(x=>x.id===b.dataset.cquote);newDraft();Object.assign(S.draft,{customerId:c.id,customer:c.name||"",company:c.company||"",phone:c.phone||"",email:c.email||"",address:c.address||""});go("quote")})}
@@ -986,10 +1067,12 @@ function editCustomer(c){const isNew=!c.id;
   <form id="cf"><div class="grid2">${[["name","Người liên hệ"],["company","Công ty / đơn vị"],["phone","Điện thoại"],["email","Email"],["address","Địa chỉ"]].map(([k,l])=>`<label class="f">${l}<input name="${k}" value="${esc(c[k]||"")}"></label>`).join("")}
   <label class="f">Phân loại<select name="tag">${CTAGS.map(x=>`<option ${c.tag===x?"selected":""}>${x}</option>`).join("")}</select></label></div>
   <label class="f" style="margin-top:10px">Ghi chú về khách<textarea name="note" rows="2">${esc(c.note||"")}</textarea></label>
+  <div class="grid2" style="margin-top:10px"><label class="f">Liên lạc gần nhất<input type="date" name="lastContact" value="${esc(c.lastContact||"")}"></label>${(c.extraOrder||Object.keys(c.extra||{})).map(k=>`<label class="f">${esc(k)}<input data-extra="${esc(k)}" value="${esc((c.extra||{})[k]??"")}"></label>`).join("")}</div>
   <label class="f" style="margin-top:10px">Hẹn chăm sóc</label>${datePicker("cfnext",c.nextCare||(isNew?addDays(todayStr(),2):""))}
   <div class="row" style="margin-top:16px">${isNew?"":`<button type="button" class="btn ghost danger" id="cdel">Xóa</button>`}<span class="grow"></span><button type="button" class="btn" data-close>Hủy</button><button class="btn pri">Lưu</button></div></form></div>`);
   bindDatePicker($("#modal"));
   $("#cf").onsubmit=async e=>{e.preventDefault();const body={};for(const [k,v] of new FormData(e.target).entries())body[k]=String(v).trim();body.nextCare=$("#cfnext").value||"";body.archived=body.tag==="Ngừng";
+    const exIn=$("#cf").querySelectorAll("[data-extra]");if(exIn.length){body.extra={...(c.extra||{})};exIn.forEach(x=>body.extra[x.dataset.extra]=x.value.trim())}
     if(isNew){body.createdAt=nowIso();body.log=[]}
     const ok=await save(()=>isNew?db.collection("customers").add(body):db.doc("customers/"+c.id).update(body),"Đã lưu khách");if(ok)closeModal()};
   if(!isNew)$("#cdel").onclick=()=>confirmBox("Xóa khách hàng?",custName(c),()=>save(()=>db.doc("customers/"+c.id).delete(),"Đã xóa"))}

@@ -36,7 +36,7 @@ aside{background:var(--navy);color:#dfe5f1;padding:22px 14px;position:sticky;top
 .ub b{display:block;color:#fff;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}.ub small{color:#9fb0cf;font-size:11.5px}.ub .btn{color:#cbd4e6}
 .scope{display:flex;gap:4px;margin-top:8px}.scope .chip{font-size:12px;padding:3px 10px;background:transparent;color:#cbd4e6;border-color:rgba(255,255,255,.2)}.scope .chip.on{background:var(--amber);color:var(--navy);border-color:var(--amber)}
 .otag{font-size:11.5px;background:#eef1f7;color:var(--navy2);border-radius:6px;padding:1px 7px;font-weight:600}
-body.staff .adm{display:none!important}
+body.staff .adm,body.nocost .cst{display:none!important}
 .sync{font-size:12px;color:#9fb0cf;padding:8px}
 .sync i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px}
 .sync.ok i{background:#3ccf86}.sync.err i{background:#ff6b5a}
@@ -305,7 +305,7 @@ function prodImg(p){return (S.images&&S.images[p.id])||catImage(p)}
 
 /* ================= Kết nối dữ liệu (Firebase) ================= */
 function setSync(state,txt){const el=$("#sync");if(!el)return;el.className="sync "+state;el.innerHTML="<i></i>"+esc(txt)}
-let FS=null,AUTH=null,ME=null,IS_ADMIN=false;const RAW={};const UNSUB=[];
+let FS=null,AUTH=null,ME=null,IS_ADMIN=false,SEE_COST=false;const RAW={};const UNSUB=[];
 const OWNED=new Set(["customers","orders","tasks","projects","trainings","routines"]);
 const PUB_FIELDS=["id","name","brand","model","origin","power","cct","size","unit","userNote","group","seed","quoteDate"];
 /* bọc Firestore: tự gắn người tạo (owner) cho dữ liệu cá nhân */
@@ -324,7 +324,7 @@ function rebuildProducts(){const arr=[];const costs=S.catalogCost||{};
   arr.sort((a,b)=>prodTitle(a).localeCompare(prodTitle(b),"vi"));S.products=arr;
   const c={};for(const [docId,d] of Object.entries(S.catalogPub||{})){const pm=new Map(((costs[docId]||{}).items||[]).map(x=>[x.id,x]));c[docId]={...d,items:(d.items||[]).map(it=>({...it,...(pm.get(it.id)||{})}))}}S.catalog=c}
 /* giá bán: quản lý tính từ giá nhập; nhân viên dùng giá bán đã lưu */
-function prodPrice(p){return IS_ADMIN&&Number(p.cost)?sellPrice(Number(p.cost),markupFor(p.brand)):Number(p.price)||0}
+function prodPrice(p){return SEE_COST&&Number(p.cost)?sellPrice(Number(p.cost),markupFor(p.brand)):Number(p.price)||0}
 function startApp(){
   if(typeof FIREBASE_CONFIG==="undefined"||!FIREBASE_CONFIG.apiKey||String(FIREBASE_CONFIG.apiKey).startsWith("ĐIỀN")){showGate(`<h2>Chưa cấu hình Firebase</h2><p>Điền thông tin dự án Firebase vào file <code>public/config.js</code> rồi đẩy lên GitHub.</p>`);return}
   firebase.initializeApp(FIREBASE_CONFIG);AUTH=firebase.auth();FS=firebase.firestore();try{FS.settings({ignoreUndefinedProperties:true,merge:true})}catch(e){}
@@ -337,7 +337,8 @@ function startApp(){
     const listed=(typeof ADMIN_EMAILS!=="undefined"?ADMIN_EMAILS:[]).map(x=>String(x).toLowerCase());
     IS_ADMIN=listed.includes(ME.email)||(prof&&prof.active!==false&&prof.role==="admin");
     if(!IS_ADMIN&&!(prof&&prof.active!==false)){showGate(`<h2>Chưa được cấp quyền</h2><p>Tài khoản <b>${esc(ME.email)}</b> chưa có trong danh sách nhân viên.<br>Nhờ quản lý thêm email này ở mục <b>Nhân viên</b>, rồi tải lại trang.</p><button class="btn" id="gout">Đăng xuất / đổi tài khoản</button>`);$("#gout").onclick=()=>AUTH.signOut();return}
-    ME.profile=prof||{};ME.name=ME.profile.name||ME.name;document.body.classList.toggle("staff",!IS_ADMIN);
+    ME.profile=prof||{};ME.name=ME.profile.name||ME.name;SEE_COST=IS_ADMIN||ME.profile.canProfit===true;
+    document.body.classList.toggle("staff",!IS_ADMIN);document.body.classList.toggle("nocost",!SEE_COST);
     $("#gate").hidden=true;$(".app").hidden=false;db=wrapDb(FS);subscribeAll();renderUserBox();render()})}
 function subscribeAll(){
   const timer=setTimeout(()=>setSync("err","Chưa kết nối được dữ liệu…"),10000);
@@ -346,16 +347,17 @@ function subscribeAll(){
   const on=(q,cb)=>UNSUB.push(q.onSnapshot(s=>{cb(s);fresh(s.metadata)},onErr));
   const owned=col=>IS_ADMIN?FS.collection(col):FS.collection(col).where("owner","==",ME.email);
   on(FS.collection("catalog"),s=>{const c={};s.docs.forEach(d=>c[d.id]=d.data());S.catalogPub=c;rebuildProducts();S.loaded.p=true;rerender("products")});
-  if(IS_ADMIN)on(FS.collection("catalogCost"),s=>{const c={};s.docs.forEach(d=>c[d.id]=d.data());S.catalogCost=c;rebuildProducts();rerender("products")});
+  if(SEE_COST)on(FS.collection("catalogCost"),s=>{const c={};s.docs.forEach(d=>c[d.id]=d.data());S.catalogCost=c;rebuildProducts();rerender("products")});
   for(const col of ["orders","tasks","customers","projects","routines","trainings"])on(owned(col),s=>{RAW[col]=s.docs.map(d=>({id:d.id,...d.data()}));applyScope();if(col==="orders")S.loaded.o=true;rerender(col)});
   if(!IS_ADMIN)on(FS.collection("trainings").where("attendees","array-contains",ME.email),s=>{RAW.trainingsInv=s.docs.map(d=>({id:d.id,...d.data()}));applyScope();rerender("trainings")});
   if(IS_ADMIN){on(FS.collection("users"),s=>{S.users=s.docs.map(d=>({id:d.id,...d.data()}));rerender("users")});
-    on(FS.collection("orderCosts"),s=>{const m={};s.docs.forEach(d=>m[d.id]=d.data().items||{});S.orderCosts=m})}
+}
+  if(SEE_COST)on(FS.collection("orderCosts"),s=>{const m={};s.docs.forEach(d=>m[d.id]=d.data().items||{});S.orderCosts=m});
   else S.users=[{id:ME.email,...ME.profile}];
   on(FS.collection("images"),s=>{const m={};s.docs.forEach(d=>m[d.id]=d.data().src);S.images=m});
   const mergeSettings=()=>{const d={...(S._setPub||{}),...(S._setPriv||{})};S.settings={...structuredClone(DEFAULT_SETTINGS),...structuredClone(d),company:{...DEFAULT_SETTINGS.company,...(d.company||{})},seller:{...DEFAULT_SETTINGS.seller,...(d.seller||{})},sections:{...DEFAULT_SETTINGS.sections,...(d.sections||{})}};S.loaded.s=true;rerender("settings")};
   on(FS.doc("settings/public"),s=>{S._setPub=s.exists?s.data():{};mergeSettings()});
-  if(IS_ADMIN)on(FS.doc("settings/private"),s=>{S._setPriv=s.exists?s.data():{};mergeSettings()});
+  if(SEE_COST)on(FS.doc("settings/private"),s=>{S._setPriv=s.exists?s.data():{};mergeSettings()});
 }
 async function save(fn,okMsg){if(!db){toast("Chưa kết nối dữ liệu");return false}try{await fn();if(okMsg)toast(okMsg);return true}catch(e){toast("Lỗi lưu: "+(e&&(e.code==="permission-denied"?"không có quyền":(e.message||e.code))||e));return false}}
 function rerender(kind){if(!ME)return;renderNav();
@@ -373,7 +375,7 @@ function showLogin(){showGate(`<h2>Đăng nhập</h2><p>Dùng tài khoản Googl
   $("#glogin").onclick=async()=>{const p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:"select_account"});
     try{await AUTH.signInWithPopup(p)}catch(e){if(["auth/popup-blocked","auth/operation-not-supported-in-this-environment","auth/cancelled-popup-request"].includes(e.code))await AUTH.signInWithRedirect(p);else if(e.code!=="auth/popup-closed-by-user")toast("Đăng nhập lỗi: "+(e.message||e.code))}}}
 function renderUserBox(){const el=$("#userbox");if(!el)return;
-  el.innerHTML=`<div class="ub">${ME.photo?`<img src="${esc(ME.photo)}" alt="">`:`<span class="av">${esc((ME.name||ME.email)[0].toUpperCase())}</span>`}<div class="grow"><b>${esc(ME.name||ME.email)}</b><small>${IS_ADMIN?"Quản lý":"Nhân viên"}</small></div><button class="btn sm ghost" id="logout" title="Đăng xuất">⎋</button></div>
+  el.innerHTML=`<div class="ub">${ME.photo?`<img src="${esc(ME.photo)}" alt="">`:`<span class="av">${esc((ME.name||ME.email)[0].toUpperCase())}</span>`}<div class="grow"><b>${esc(ME.name||ME.email)}</b><small>${IS_ADMIN?"Quản lý":SEE_COST?"Nhân viên · xem lợi nhuận":"Nhân viên"}</small></div><button class="btn sm ghost" id="logout" title="Đăng xuất">⎋</button></div>
   ${IS_ADMIN?`<div class="scope"><button class="chip ${S.scope!=="all"?"on":""}" data-scope="me">Của tôi</button><button class="chip ${S.scope==="all"?"on":""}" data-scope="all">Cả nhóm</button></div>`:""}`;
   $("#logout").onclick=()=>confirmBox("Đăng xuất?",ME.email,()=>AUTH.signOut());
   el.querySelectorAll("[data-scope]").forEach(b=>b.onclick=()=>{S.scope=b.dataset.scope;try{localStorage.setItem("scope",S.scope)}catch(e){}applyScope();renderUserBox();render()})}
@@ -513,7 +515,7 @@ function bindCommon(root){
   root.querySelectorAll("[data-tredit]").forEach(b=>b.onclick=()=>editTraining(S.trainings.find(x=>x.id===b.dataset.tredit)));
   root.querySelectorAll("[data-rtdone]").forEach(c=>c.onchange=()=>save(()=>db.doc("routines/"+c.dataset.rtdone).update({doneOn:c.checked?todayStr():""}),c.checked?"Đã xong ✓":""));
 }
-function withCosts(o){if(!IS_ADMIN)return o;const pc=S.orderCosts[o.id];
+function withCosts(o){if(!SEE_COST)return o;const pc=S.orderCosts[o.id];
   o.items=(o.items||[]).map((it,i)=>{const c=pc&&pc[i];if(c)return{...it,...c};const p=it.pid&&S.products.find(x=>x.id===it.pid);return p?{...it,cost:Number(p.cost)||0,markup:it.price&&p.cost?Math.round((it.price/p.cost-1)*1000)/10:0,inote:[p.userNote,p.note].filter(Boolean).join(" · "),supplier:p.supplier||""}:it});return o}
 function bindOrderActions(){
   $("#main").querySelectorAll("[data-adv]").forEach(b=>b.onclick=()=>{const o=S.orders.find(x=>x.id===b.dataset.adv);if(o)setStatus(o,o.status+1)});
@@ -572,7 +574,7 @@ function pickCct(it,v){const opts=lineCctOpts(it);if(!it.cctOpts)it.cctOpts=opts
   if(!v){it.name=it.nameOrig;it.cct=it.cctOrig;it.cctPick="";return}
   it.cctPick=v;it.cct=v;it.name=it.nameOrig.replace(CCT_SEQ,v).replace(/\s{2,}/g," ").trim()}
 function itemFromProduct(p){const pct=markupFor(p.brand);return{pid:p.id,name:prodTitle(p),brand:p.brand||"",model:p.model||"",origin:p.origin||"",power:p.power||"",cct:p.cct||"",size:p.size||"",unit:p.unit||"Cái",
-  inote:IS_ADMIN?[p.userNote,p.note].filter(Boolean).join(" · "):(p.userNote||""),supplier:IS_ADMIN?(p.supplier||""):"",remark:"",img:prodImg(p),cost:IS_ADMIN?Number(p.cost)||0:0,markup:IS_ADMIN?pct:0,price:prodPrice(p),qty:1}}
+  inote:SEE_COST?[p.userNote,p.note].filter(Boolean).join(" · "):(p.userNote||""),supplier:SEE_COST?(p.supplier||""):"",remark:"",img:prodImg(p),cost:SEE_COST?Number(p.cost)||0:0,markup:SEE_COST?pct:0,price:prodPrice(p),qty:1}}
 function viewQuote(){
   if(!S.draft)newDraft();const d=S.draft;if(!d.quoteDate)d.quoteDate=(d.createdAt||nowIso()).slice(0,10);
   $("#main").innerHTML=`${loadingNote()}<div class="row"><div class="grow"><h1>${d.id?"Sửa đơn "+esc(d.code):"Báo giá mới"}</h1><p class="sub">Gõ tên / mã / công suất để thêm sản phẩm từ kệ. Giá bán tự tính theo % lãi, sửa tay được.</p></div>
@@ -594,7 +596,7 @@ function viewQuote(){
   </div>
   <div class="sec">Sản phẩm</div>
   <div class="search"><span class="mag">🔍</span><input class="big" id="psearch" placeholder="VD: panel 600 40w, AT04 110, philips meson, BY239P…" autocomplete="off"><div class="results" id="pres" hidden></div></div>
-  <div class="card tbl-wrap" style="margin-top:10px;padding:6px 10px"><table class="lines"><thead><tr><th>#</th><th class="imgcell">Ảnh</th><th>Sản phẩm & thông số</th><th class="hide-m">ĐVT</th><th class="r">SL</th><th class="r hide-m adm">Giá nhập</th><th class="r hide-m adm">% lãi</th><th class="r">Đơn giá bán</th><th class="r">Thành tiền</th><th></th></tr></thead><tbody id="lines"></tbody></table>
+  <div class="card tbl-wrap" style="margin-top:10px;padding:6px 10px"><table class="lines"><thead><tr><th>#</th><th class="imgcell">Ảnh</th><th>Sản phẩm & thông số</th><th class="hide-m">ĐVT</th><th class="r">SL</th><th class="r hide-m cst">Giá nhập</th><th class="r hide-m cst">% lãi</th><th class="r">Đơn giá bán</th><th class="r">Thành tiền</th><th></th></tr></thead><tbody id="lines"></tbody></table>
     <div class="row" style="padding:8px 0"><button class="btn sm" id="addfree">+ Dòng tự nhập</button></div>
     <div class="tot" id="tot"></div>
   </div>
@@ -623,7 +625,7 @@ async function saveDraft(){const d=S.draft;if(!d.items.length){toast("Chưa có 
   const isNewQ=!d.id;
   const ok=await save(async()=>{try{await upsertCustomerFromDraft(d,isNewQ);body.customerId=d.customerId||""}catch(e){}
     if(d.id)await db.doc("orders/"+d.id).set(body);else{const ref=await db.collection("orders").add(body);d.id=ref.id}
-    if(IS_ADMIN)await db.doc("orderCosts/"+d.id).set({items:privItems,updatedAt:nowIso()})},"Đã lưu "+d.code+(d.careDate?` · hẹn gọi khách ${dayLabel(d.careDate).toLowerCase()}`:""));
+    if(SEE_COST)await db.doc("orderCosts/"+d.id).set({items:privItems,updatedAt:nowIso()})},"Đã lưu "+d.code+(d.careDate?` · hẹn gọi khách ${dayLabel(d.careDate).toLowerCase()}`:""));
   if(ok){S.draft=null;go("orders")}}
 function renderLines(){const d=S.draft;const tb=$("#lines");if(!tb)return;
   tb.innerHTML=d.items.length?d.items.map((it,i)=>`<tr>
@@ -634,8 +636,8 @@ function renderLines(){const d=S.draft;const tb=$("#lines");if(!tb)return;
       <input data-i="${i}" data-f="remark" value="${esc(it.remark||"")}" placeholder="Ghi chú in trên báo giá (tuỳ chọn)" style="margin-top:4px;font-size:13px;padding:4px 8px"></td>
     <td class="hide-m"><input data-i="${i}" data-f="unit" value="${esc(it.unit)}" style="width:64px"></td>
     <td class="r"><input data-i="${i}" data-f="qty" value="${it.qty}" inputmode="numeric" style="width:64px;text-align:right"></td>
-    <td class="r hide-m adm"><input data-i="${i}" data-f="cost" value="${money(it.cost)}" inputmode="numeric" style="width:105px;text-align:right"></td>
-    <td class="r hide-m adm"><input data-i="${i}" data-f="markup" value="${it.markup}" inputmode="decimal" style="width:58px;text-align:right"></td>
+    <td class="r hide-m cst"><input data-i="${i}" data-f="cost" value="${money(it.cost)}" inputmode="numeric" style="width:105px;text-align:right"></td>
+    <td class="r hide-m cst"><input data-i="${i}" data-f="markup" value="${it.markup}" inputmode="decimal" style="width:58px;text-align:right"></td>
     <td class="r"><input data-i="${i}" data-f="price" value="${money(it.price)}" inputmode="numeric" style="width:115px;text-align:right;font-weight:700"></td>
     <td class="r money" data-sum="${i}">${money(it.price*it.qty)}</td>
     <td><button class="btn sm ghost danger" data-rm="${i}">✕</button></td></tr>`).join(""):`<tr><td colspan="10" class="empty">Chưa có sản phẩm – gõ vào ô tìm kiếm phía trên.</td></tr>`;
@@ -660,7 +662,7 @@ function renderTot(){const d=S.draft,T=orderTotals(d);const el=$("#tot");if(!el)
   el.innerHTML=`<div><span>Tổng tiền</span><b class="money">${money(T.sub)}</b></div>
   <div><span>VAT <input id="vatp" value="${d.vatPct}" style="width:50px;padding:3px 6px;text-align:right">%</span><b class="money">${money(T.vat)}</b></div>
   <div class="big"><span>Tổng tiền sau VAT</span><span class="money">${money(T.total)} đ</span></div>
-  <div class="adm" style="font-size:12.5px;color:var(--green)"><span>Lãi dự kiến (chỉ quản lý thấy)</span><span class="money">${money(profit)}</span></div>`;
+  <div class="cst" style="font-size:12.5px;color:var(--green)"><span>Lãi dự kiến (nhân viên không có quyền sẽ không thấy)</span><span class="money">${money(profit)}</span></div>`;
   $("#vatp").oninput=e=>{d.vatPct=num(e.target.value);const T2=orderTotals(d);el.querySelectorAll(".money")[1].textContent=money(T2.vat);el.querySelector(".big .money").textContent=money(T2.total)+" đ"}}
 let hl=-1;
 function bindSearch(){const inp=$("#psearch"),box=$("#pres");
@@ -671,7 +673,7 @@ function refreshSearch(){const inp=$("#psearch"),box=$("#pres");if(!inp||!box||d
   if(!q.trim()){box.hidden=true;return}
   const list=matchProducts(q,30);box.hidden=false;
   box.innerHTML=list.length?list.map(p=>{const pct=markupFor(p.brand);const im=prodImg(p);return`<div class="res" data-pid="${p.id}">${im?`<img class="pimg" src="${im}" alt="">`:""}<div class="grow"><div class="pname">${esc(prodTitle(p))}</div><div class="specs">${specList(p).map(x=>`<span>${esc(x)}</span>`).join("")}</div>${p.userNote?`<div class="note">${esc(p.userNote)}</div> `:""}${p.note?`<div class="note">${esc(p.note)}</div>`:""}</div>
-    <div style="text-align:right"><b class="money">${money(prodPrice(p))}</b>${IS_ADMIN?`<div class="specs">nhập ${money(p.cost)} · +${pct}%</div><div class="specs">${esc(p.supplier||"")}</div>`:""}</div></div>`}).join(""):`<div class="empty">Không thấy "${esc(q)}" trên kệ.</div>`;
+    <div style="text-align:right"><b class="money">${money(prodPrice(p))}</b>${SEE_COST?`<div class="specs">nhập ${money(p.cost)} · +${pct}%</div><div class="specs">${esc(p.supplier||"")}</div>`:""}</div></div>`}).join(""):`<div class="empty">Không thấy "${esc(q)}" trên kệ.</div>`;
   box.querySelectorAll("[data-pid]").forEach(r=>r.onclick=()=>{const p=S.products.find(x=>x.id===r.dataset.pid);const ex=S.draft.items.find(i=>i.pid===p.id);if(ex)ex.qty+=1;else S.draft.items.push(itemFromProduct(p));renderLines();inp.value="";box.hidden=true;inp.focus();toast("Đã thêm "+prodTitle(p))})}
 
 /* ================= XEM & XUẤT PDF (mẫu Elmall) ================= */
@@ -733,7 +735,7 @@ function viewShelf(){const brands=Object.entries(S.products.reduce((m,p)=>{if(p.
   $("#main").innerHTML=`${loadingNote()}<div class="row"><div class="grow"><h1>Kệ sản phẩm</h1><p class="sub">${S.products.length.toLocaleString("vi-VN")} sản phẩm · gõ là ra thông số, chú thích và giá.</p></div>${IS_ADMIN?`<button class="btn amb" id="padd">+ Thêm sản phẩm</button>`:""}</div>
   <div class="search"><span class="mag">🔍</span><input class="big" id="sq" placeholder="Tìm: panel 600x600, AT04 110 12W, 6500K, meson, quạt hút…" value="${esc(S.shelfQ)}"></div>
   <div class="row" style="margin:12px 0;gap:8px"><div class="chips grow"><button class="chip ${!S.shelfBrand?"on":""}" data-b="">Tất cả hãng</button>${brands.map(([b,n])=>`<button class="chip ${S.shelfBrand===b?"on":""}" data-b="${esc(b)}">${esc(b)} <span style="opacity:.6">${n}</span></button>`).join("")}</div>
-    <select id="ssup" class="adm" style="width:auto"><option value="">Mọi nhà cung cấp</option>${sups.map(s=>`<option ${S.shelfSup===s?"selected":""}>${esc(s)}</option>`).join("")}</select></div>
+    <select id="ssup" class="cst" style="width:auto"><option value="">Mọi nhà cung cấp</option>${sups.map(s=>`<option ${S.shelfSup===s?"selected":""}>${esc(s)}</option>`).join("")}</select></div>
   <div id="slist"></div>`;
   $("#sq").oninput=e=>{S.shelfQ=e.target.value;renderShelfList()};
   $("#ssup").onchange=e=>{S.shelfSup=e.target.value;renderShelfList()};
@@ -744,9 +746,9 @@ function renderShelfList(){const el=$("#slist");if(!el)return;let list=matchProd
   if(!list.length){el.innerHTML=`<div class="card empty">${!S.loaded.p?"Đang tải…":S.products.length?"Không tìm thấy sản phẩm phù hợp.":"Kệ đang trống. Vào <b>Nhập báo giá NCC</b> để đưa báo giá nhà cung cấp lên kệ, hoặc bấm <b>+ Thêm sản phẩm</b>."}</div>`;return}
   el.innerHTML=`<div class="pgrid">${list.slice(0,120).map(p=>{const pct=markupFor(p.brand);return`<div class="pcard">
     <div class="top"><div class="pname grow">${esc(prodTitle(p))}</div>${prodImg(p)?`<img class="pimg" src="${prodImg(p)}" alt="">`:""}</div>
-    <table class="spec-tbl">${[["Hãng",p.brand],["Model",p.model],["Xuất xứ",p.origin],["Công suất",p.power],["Màu ánh sáng",p.cct],["Kích thước",p.size],["Nhóm",p.group],["NCC",IS_ADMIN?p.supplier:""]].filter(r=>r[1]).map(r=>`<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>
-    ${p.userNote?`<div class="note">📌 ${esc(p.userNote)}</div>`:""}${IS_ADMIN&&p.note?`<div class="note">${esc(p.note)}</div>`:""}
-    <div class="price-row"><div>${IS_ADMIN?`<div class="specs">Giá nhập ${money(p.cost)}${p.quoteDate?" · "+fmtD(p.quoteDate):""}${p.history&&p.history.length?` · <span title="Giá cũ">trước ${money(p.history[0].cost)}</span>`:""}</div>`:`<div class="specs">Giá bán (chưa VAT)</div>`}<b class="money" style="font-size:17px">${money(prodPrice(p))} đ</b> ${IS_ADMIN?`<span class="tag">+${pct}%</span>`:""}</div>
+    <table class="spec-tbl">${[["Hãng",p.brand],["Model",p.model],["Xuất xứ",p.origin],["Công suất",p.power],["Màu ánh sáng",p.cct],["Kích thước",p.size],["Nhóm",p.group],["NCC",SEE_COST?p.supplier:""]].filter(r=>r[1]).map(r=>`<tr><td>${r[0]}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>
+    ${p.userNote?`<div class="note">📌 ${esc(p.userNote)}</div>`:""}${SEE_COST&&p.note?`<div class="note">${esc(p.note)}</div>`:""}
+    <div class="price-row"><div>${SEE_COST?`<div class="specs">Giá nhập ${money(p.cost)}${p.quoteDate?" · "+fmtD(p.quoteDate):""}${p.history&&p.history.length?` · <span title="Giá cũ">trước ${money(p.history[0].cost)}</span>`:""}</div>`:`<div class="specs">Giá bán (chưa VAT)</div>`}<b class="money" style="font-size:17px">${money(prodPrice(p))} đ</b> ${SEE_COST?`<span class="tag">+${pct}%</span>`:""}</div>
     ${IS_ADMIN?`<div><button class="btn sm" data-ed="${p.id}">Sửa</button></div>`:""}</div></div>`}).join("")}</div>${list.length>120?`<p class="specs">Hiển thị 120/${list.length.toLocaleString("vi-VN")} sản phẩm – gõ thêm để lọc.</p>`:""}`;
   el.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>editProduct(S.products.find(x=>x.id===b.dataset.ed)))}
 const PFIELDS=[["name","Tên sản phẩm"],["brand","Hãng"],["model","Model / mã"],["origin","Xuất xứ"],["power","Công suất"],["cct","Màu ánh sáng"],["size","Kích thước"],["unit","ĐVT"],["cost","Giá nhập (chưa VAT)"],["supplier","Nhà cung cấp"]];
@@ -916,8 +918,8 @@ function bindProfile(){$("#psave").onclick=async()=>{const body={name:$("#p_name
 function viewTeam(){if(!IS_ADMIN){S.view="today";return render()}
   const stat=email=>{const o=(RAW.orders||[]).filter(x=>x.owner===email);const c=(RAW.customers||[]).filter(x=>x.owner===email);const t=todayStr();
     return`${c.length} khách · ${o.length} báo giá/đơn · ${o.filter(x=>x.status>=1).length} đã chốt · ${c.filter(x=>x.nextCare&&x.nextCare<=t).length} khách cần gọi hôm nay`};
-  $("#main").innerHTML=`<div class="row"><div class="grow"><h1>Nhân viên</h1><p class="sub">Thêm email Google của nhân viên để họ đăng nhập được. Nhân viên chỉ thấy khách, báo giá, đơn của chính mình và không thấy giá nhập.</p></div><button class="btn amb" id="uadd">+ Thêm nhân viên</button></div>
-  ${S.users.length?S.users.map(u=>`<div class="order"><div class="row"><h3 class="grow">${esc(u.name||u.id)} <span class="tag ${u.role==="admin"?"amb":"blue"}">${u.role==="admin"?"Quản lý":"Nhân viên"}</span>${u.active===false?` <span class="tag red">Đã khoá</span>`:""}</h3><button class="btn sm" data-uedit="${esc(u.id)}">Sửa</button></div>
+  $("#main").innerHTML=`<div class="row"><div class="grow"><h1>Nhân viên</h1><p class="sub">Thêm email Google của nhân viên để họ đăng nhập được. Nhân viên chỉ thấy khách, báo giá, đơn của chính mình. Giá nhập và % lãi chỉ hiện với người được bật quyền “Xem & chỉnh lợi nhuận”.</p></div><button class="btn amb" id="uadd">+ Thêm nhân viên</button></div>
+  ${S.users.length?S.users.map(u=>`<div class="order"><div class="row"><h3 class="grow">${esc(u.name||u.id)} <span class="tag ${u.role==="admin"?"amb":"blue"}">${u.role==="admin"?"Quản lý":"Nhân viên"}</span>${u.role!=="admin"&&u.canProfit?` <span class="tag green">Xem & chỉnh lợi nhuận</span>`:""}${u.active===false?` <span class="tag red">Đã khoá</span>`:""}</h3><button class="btn sm" data-uedit="${esc(u.id)}">Sửa</button></div>
     <div class="specs" style="margin-top:3px"><span>${esc(u.id)}</span>${u.phone?`<span>☎ ${esc(u.phone)}</span>`:""}${u.code?`<span>Mã báo giá: ${esc(u.code)}</span>`:""}</div><div class="specs" style="margin-top:4px">${stat(u.id)}</div></div>`).join(""):`<div class="card empty">Chưa có nhân viên nào.</div>`}`;
   $("#uadd").onclick=()=>editUser({});$("#main").querySelectorAll("[data-uedit]").forEach(b=>b.onclick=()=>editUser(S.users.find(x=>x.id===b.dataset.uedit)))}
 function editUser(u){const isNew=!u.id;
@@ -926,10 +928,11 @@ function editUser(u){const isNew=!u.id;
   <label class="f">Tên hiển thị<input name="name" value="${esc(u.name||"")}" placeholder="VD: Mr. Minh"></label>
   <label class="f">Mobile<input name="phone" value="${esc(u.phone||"")}"></label><label class="f">Mã trên số báo giá<input name="code" value="${esc(u.code||"")}" placeholder="VD: MI"></label>
   <label class="f">Vai trò<select name="role"><option value="staff" ${u.role!=="admin"?"selected":""}>Nhân viên</option><option value="admin" ${u.role==="admin"?"selected":""}>Quản lý (thấy giá nhập, mọi dữ liệu)</option></select></label>
+  <label class="f">Lợi nhuận<select name="canProfit"><option value="0" ${!u.canProfit?"selected":""}>Không xem giá nhập (chỉ thấy giá bán)</option><option value="1" ${u.canProfit?"selected":""}>Được xem & chỉnh lợi nhuận (thấy giá nhập, % lãi)</option></select></label>
   <label class="f">Trạng thái<select name="active"><option value="1" ${u.active!==false?"selected":""}>Đang làm</option><option value="0" ${u.active===false?"selected":""}>Khoá (không cho đăng nhập)</option></select></label></div>
   <div class="row" style="margin-top:16px">${isNew||u.id===ME.email?"":`<button type="button" class="btn ghost danger" id="udel">Xoá</button>`}<span class="grow"></span><button type="button" class="btn" data-close>Hủy</button><button class="btn pri">Lưu</button></div></form></div>`);
   $("#uf").onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target).entries());const email=String(f.email||u.id).trim().toLowerCase();
-    const body={email,name:f.name.trim(),phone:f.phone.trim(),code:f.code.trim().toUpperCase(),role:f.role,active:f.active==="1",updatedAt:nowIso()};
+    const body={email,name:f.name.trim(),phone:f.phone.trim(),code:f.code.trim().toUpperCase(),role:f.role,active:f.active==="1",canProfit:f.canProfit==="1",updatedAt:nowIso()};
     const ok=await save(()=>db.doc("users/"+email).set({...(u.id?u:{}),...body,id:undefined}),"Đã lưu nhân viên");if(ok)closeModal()};
   if(!isNew&&u.id!==ME.email)$("#udel").onclick=()=>confirmBox("Xoá nhân viên?",u.id+" sẽ không đăng nhập được nữa. Khách và đơn của họ vẫn còn.",()=>save(()=>db.doc("users/"+u.id).delete(),"Đã xoá"))}
 

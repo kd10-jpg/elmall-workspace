@@ -2,6 +2,7 @@ rules_version = '2';
 // Luật bảo mật Elmall:
 // - Quản lý (email trong danh sách dưới hoặc users/{email}.role == 'admin'): đọc/ghi mọi thứ, thấy giá nhập.
 // - Nhân viên (có users/{email}, active != false): chỉ đọc/ghi khách, đơn, việc của chính mình; chỉ thấy giá bán.
+// - Nhân viên được bật canProfit: thêm quyền xem giá nhập, % lãi và lưu lợi nhuận của báo giá.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null && request.auth.token.email != null && request.auth.token.email_verified == true; }
@@ -10,6 +11,7 @@ service cloud.firestore {
     function prof() { return get(/databases/$(database)/documents/users/$(me())).data; }
     function isAdmin() { return signedIn() && (me() in ['kd10@elmall.vn'] || (hasProf() && prof().role == 'admin' && prof().active != false)); }
     function isMember() { return signedIn() && (isAdmin() || (hasProf() && prof().active != false)); }
+    function canCost() { return isAdmin() || (isMember() && prof().canProfit == true); }
     function ownsExisting() { return resource.data.owner == me(); }
     function ownsNew() { return request.resource.data.owner == me(); }
     function personal(col) { return col in ['customers', 'orders', 'tasks', 'projects', 'routines']; }
@@ -21,10 +23,10 @@ service cloud.firestore {
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'phone', 'quoteEmail']));
     }
     match /settings/public { allow read: if isMember(); allow write: if isAdmin(); }
-    match /settings/private { allow read, write: if isAdmin(); }
+    match /settings/private { allow read: if canCost(); allow write: if isAdmin(); }
     match /catalog/{id} { allow read: if isMember(); allow write: if isAdmin(); }
-    match /catalogCost/{id} { allow read, write: if isAdmin(); }
-    match /orderCosts/{id} { allow read, write: if isAdmin(); }
+    match /catalogCost/{id} { allow read: if canCost(); allow write: if isAdmin(); }
+    match /orderCosts/{id} { allow read, write: if canCost(); }
     match /images/{id} { allow read, write: if isMember(); }
 
     match /{col}/{id} {

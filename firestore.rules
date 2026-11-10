@@ -8,7 +8,7 @@ service cloud.firestore {
     function me() { return request.auth.token.email.lower(); }
     function hasProf() { return exists(/databases/$(database)/documents/users/$(me())); }
     function prof() { return get(/databases/$(database)/documents/users/$(me())).data; }
-    function isAdmin() { return signedIn() && (me() in ['ĐIỀN_EMAIL_QUAN_LY@gmail.com'] || (hasProf() && prof().role == 'admin' && prof().active != false)); }
+    function isAdmin() { return signedIn() && (me() in ['kd10@elmall.vn'] || (hasProf() && prof().role == 'admin' && prof().active != false)); }
     function isMember() { return signedIn() && (isAdmin() || (hasProf() && prof().active != false)); }
     function ownsExisting() { return resource.data.owner == me(); }
     function ownsNew() { return request.resource.data.owner == me(); }

@@ -315,13 +315,13 @@ function catImage(p){if(!CAT||!p)return"";const key=(p.id||"")+"|"+p.name+"|"+p.
       if(e.c.length>=6&&pc.includes(e.c))sc+=4;
       if((code||fam)&&sc>best){best=sc;src=e.src}}}
   const r=best>=4?src:"";catMemo.set(key,r);return r}
-function prodImg(p){return (S.images&&S.images[p.id])||catImage(p)}
+function prodImg(p){return (S.images&&S.images[p.id])||p.img||catImage(p)}
 
 /* ================= Kết nối dữ liệu (Firebase) ================= */
 function setSync(state,txt){const el=$("#sync");if(!el)return;el.className="sync "+state;el.innerHTML="<i></i>"+esc(txt)}
 let FS=null,AUTH=null,ME=null,IS_ADMIN=false,SEE_COST=false;const RAW={};const UNSUB=[];
 const OWNED=new Set(["customers","orders","tasks","projects","trainings","routines"]);
-const PUB_FIELDS=["id","name","brand","model","origin","power","cct","size","unit","userNote","group","seed","quoteDate","priceMode","listPrice"];
+const PUB_FIELDS=["id","name","brand","model","origin","power","cct","size","unit","userNote","group","seed","quoteDate","priceMode","listPrice","img"];
 /* bọc Firestore: tự gắn người tạo (owner) cho dữ liệu cá nhân */
 function wrapDb(fs){return{
   doc(p){const r=fs.doc(p);const col=p.split("/")[0];return{id:r.id,path:p,get:()=>r.get(),update:d=>r.update(d),delete:()=>r.delete(),onSnapshot:(...a)=>r.onSnapshot(...a),
